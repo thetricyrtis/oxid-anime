@@ -1,0 +1,2 @@
+# oxid-anime
+A tui anime watching app.
