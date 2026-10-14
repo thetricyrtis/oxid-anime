@@ -4,6 +4,6 @@ A tui anime watching app.
 
 # Project Status
 
-In development.
+In development. Not yet usable.
 
 > It is being developed with Gemini.
