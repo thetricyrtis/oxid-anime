@@ -6,4 +6,4 @@ A tui anime watching app.
 
 In development. Not yet usable.
 
-> It is being developed with Gemini.
+> It is being developed with AI.
