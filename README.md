@@ -1,9 +1,15 @@
 # oxid-anime
 
-A tui anime watching app.
+A TUI anime watching app built with Rust.
 
-# Project Status
+## Project Status
+**Early Access (v0.1.4)** – Core UI and search are functional.
+Currently working on: MPV integration, local-first library, and plugin system.
 
-In development. Not yet usable.
+## Features
+- Fast TUI with Kitty/Ghostty image support
+- Hybrid search (offline DB + Anilist API)
+- English & Turkish localization
+- Optimized for low-end hardware
 
-> It is being developed with AI.
+> Note: Developed with AI assistance, human-managed architecture.
