@@ -8,7 +8,7 @@ A TUI anime watching app built with Rust.
 **Currently working on:** 
 - MPV integration
 - Local-first library 
-- Ts/js plugin system
+- TypeScript/JavaScript plugin system
 
 ## Features
 - Fast TUI with Kitty/Ghostty image support
