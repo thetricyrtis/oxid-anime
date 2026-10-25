@@ -2,6 +2,8 @@
 
 A TUI anime watching app built with Rust.
 
+![oxid-anime screenshot](assets/screenshot.png)
+
 ## Project Status
 
 **Early Access (v0.1.4)** – Core UI and search are functional.
