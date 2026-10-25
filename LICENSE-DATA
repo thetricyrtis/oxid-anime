@@ -1,0 +1,12 @@
+The anime metadata used in this application is sourced from the anime-offline-database project.
+
+Source: https://github.com/cedya77/anime-offline-database
+Original project: https://github.com/manami-project/anime-offline-database
+
+This data is made available under the Open Database License (ODbL) v1.0.
+Any rights in individual contents of the database are licensed under the
+Database Contents License (DbCL) v1.0.
+
+License texts:
+- ODbL v1.0: https://opendatacommons.org/licenses/odbl/1-0/
+- DbCL v1.0: https://opendatacommons.org/licenses/dbcl/1-0/
