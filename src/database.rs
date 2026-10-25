@@ -2,9 +2,7 @@ use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::Path;
 use tokio::sync::mpsc;
-use flate2::read::GzDecoder;
-use flate2::write::GzEncoder;
-use flate2::Compression;
+use zstd::stream::read::Decoder as ZstdDecoder;
 use crate::models::{OfflineAnimeEntry, DbUpdateResult};
 
 #[derive(serde::Deserialize)]
@@ -25,8 +23,8 @@ struct GithubAsset {
 }
 
 pub fn check_and_extract_db() -> io::Result<()> {
-    let compressed_path = "data/compressed/anime-offline-database-minified.json.gz";
-    let extracted_path = "data/database/anime-offline-database-minified.json";
+    let compressed_path = "data/compressed/anilist-minified.json.zst";
+    let extracted_path = "data/database/anilist-minified.json";
 
     if !Path::new(extracted_path).exists() && Path::new(compressed_path).exists() {
         println!("Extracting offline database, please wait...");
@@ -34,7 +32,7 @@ pub fn check_and_extract_db() -> io::Result<()> {
             fs::create_dir_all(parent)?;
         }
         let f = File::open(compressed_path)?;
-        let mut decoder = GzDecoder::new(f);
+        let mut decoder = ZstdDecoder::new(f)?;
         let mut dest = File::create(extracted_path)?;
         io::copy(&mut decoder, &mut dest)?;
         println!("Database extracted successfully!");
@@ -43,7 +41,7 @@ pub fn check_and_extract_db() -> io::Result<()> {
 }
 
 pub fn load_offline_db() -> io::Result<Vec<OfflineAnimeEntry>> {
-    let path = "data/database/anime-offline-database-minified.json";
+    let path = "data/database/anilist-minified.json";
     if !Path::new(path).exists() {
         return Ok(Vec::new());
     }
@@ -63,8 +61,9 @@ pub fn spawn_db_update(tx: mpsc::UnboundedSender<DbUpdateResult>) {
                 .build()
                 .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
                 
+            // Cedya77 reposuna geçildi
             let release: GithubRelease = client
-                .get("https://api.github.com/repos/manami-project/anime-offline-database/releases/latest")
+                .get("https://api.github.com/repos/cedya77/anime-offline-database/releases/latest")
                 .send()
                 .await
                 .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?
@@ -72,8 +71,9 @@ pub fn spawn_db_update(tx: mpsc::UnboundedSender<DbUpdateResult>) {
                 .await
                 .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
                 
+            // Anilist zst dosyası aranıyor
             let asset = release.assets.iter()
-                .find(|a| a.name == "anime-offline-database-minified.json")
+                .find(|a| a.name == "anilist-minified.json.zst")
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Required database asset not found in latest release"))?;
                 
             let download_url = &asset.browser_download_url;
@@ -84,30 +84,30 @@ pub fn spawn_db_update(tx: mpsc::UnboundedSender<DbUpdateResult>) {
             let mut response = client.get(download_url).send().await.map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
             
             let compressed_dir = "data/compressed";
-            let compressed_temp_path = "data/compressed/anime-offline-database-minified.json.gz.tmp";
+            let compressed_temp_path = "data/compressed/anilist-minified.json.zst.tmp";
             fs::create_dir_all(compressed_dir)?;
             
-            let out_file = File::create(compressed_temp_path)?;
-            let mut encoder = GzEncoder::new(out_file, Compression::default());
-            
+            // Zaten .zst indirdiğimiz için tekrar şifrelemeye gerek yok, direkt yazıyoruz
+            let mut out_file = File::create(compressed_temp_path)?;
             while let Some(chunk) = response.chunk().await.map_err(|e| io::Error::new(io::ErrorKind::Other, e))? {
-                encoder.write_all(&chunk)?;
+                out_file.write_all(&chunk)?;
             }
-            encoder.finish()?;
+            out_file.flush()?;
             
             let _ = tx.send(DbUpdateResult::Progress("db_updating_extracting".to_string()));
             
             let database_dir = "data/database";
-            let decompressed_temp_path = "data/database/anime-offline-database-minified.json.tmp";
+            let decompressed_temp_path = "data/database/anilist-minified.json.tmp";
             fs::create_dir_all(database_dir)?;
             
+            // Zstd ile açıyoruz
             let f = File::open(compressed_temp_path)?;
-            let mut decoder = GzDecoder::new(f);
+            let mut decoder = ZstdDecoder::new(f)?;
             let mut dest = File::create(decompressed_temp_path)?;
             io::copy(&mut decoder, &mut dest)?;
             
-            let final_compressed_path = "data/compressed/anime-offline-database-minified.json.gz";
-            let final_decompressed_path = "data/database/anime-offline-database-minified.json";
+            let final_compressed_path = "data/compressed/anilist-minified.json.zst";
+            let final_decompressed_path = "data/database/anilist-minified.json";
             
             fs::rename(compressed_temp_path, final_compressed_path)?;
             fs::rename(decompressed_temp_path, final_decompressed_path)?;

@@ -135,6 +135,7 @@ pub struct OfflineAnimeSeason {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OfflineAnimeEntry {
+    #[serde(default)]
     pub sources: Vec<String>,
     pub title: String,
     #[serde(default)]
@@ -142,12 +143,16 @@ pub struct OfflineAnimeEntry {
     #[serde(rename = "type", default)]
     pub type_field: String,
     pub episodes: Option<u32>,
+    #[serde(default)]
     pub picture: Option<String>,
+    #[serde(default)]
     pub thumbnail: Option<String>,
-    pub synonyms: Option<Vec<String>>,
-    #[serde(rename = "relatedAnime")]
-    pub relations: Option<Vec<String>>,
-    pub tags: Option<Vec<String>>,
+    #[serde(default)]
+    pub synonyms: Vec<String>,
+    #[serde(rename = "relatedAnime", default)]
+    pub relations: Vec<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
     #[serde(rename = "animeSeason")]
     pub anime_season: Option<OfflineAnimeSeason>,
 }

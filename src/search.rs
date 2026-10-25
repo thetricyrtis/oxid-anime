@@ -132,17 +132,15 @@ pub fn perform_offline_search(query: &str, db: &[OfflineAnimeEntry]) -> Vec<Anim
                 matcher.fuzzy_match(&entry.title, query).unwrap_or(0)
             };
 
-            if let Some(syns) = &entry.synonyms {
-                for syn in syns {
-                    let syn_lower = syn.to_lowercase();
-                    if syn_lower.contains(&query_lower) {
-                        if 90 > best_score {
-                            best_score = 90;
-                        }
-                    } else if let Some(score) = matcher.fuzzy_match(syn, query) {
-                        if score > best_score {
-                            best_score = score;
-                        }
+            for syn in &entry.synonyms {
+                let syn_lower = syn.to_lowercase();
+                if syn_lower.contains(&query_lower) {
+                    if 90 > best_score {
+                        best_score = 90;
+                    }
+                } else if let Some(score) = matcher.fuzzy_match(syn, query) {
+                    if score > best_score {
+                        best_score = score;
                     }
                 }
             }
@@ -160,20 +158,17 @@ pub fn perform_offline_search(query: &str, db: &[OfflineAnimeEntry]) -> Vec<Anim
     scored_entries.into_iter()
         .take(40)
         .map(|(_, entry)| {
-            // models.rs içinde yazdığımız anilist_id() metodunu güvenle çağırıyoruz
             let id = entry.anilist_id().unwrap_or(0);
             let title = entry.title.clone();
             let status = entry.status.clone();
             let episodes = entry.episodes;
             let cover_image_url = entry.picture.clone().unwrap_or_default();
             let season_year = entry.anime_season.as_ref().and_then(|s| s.year);
-            let genres = entry.tags.clone().unwrap_or_default();
+            let genres = entry.tags.clone();
 
             let mut description = format!("Type: {}", entry.type_field);
-            if let Some(syns) = &entry.synonyms {
-                if !syns.is_empty() {
-                    description.push_str(&format!("\nSynonyms: {}", syns.join(", ")));
-                }
+            if !entry.synonyms.is_empty() {
+                description.push_str(&format!("\nSynonyms: {}", entry.synonyms.join(", ")));
             }
             if !genres.is_empty() {
                 description.push_str(&format!("\nTags: {}", genres.join(", ")));
