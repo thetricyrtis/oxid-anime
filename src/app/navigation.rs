@@ -64,21 +64,18 @@ impl App {
         self.settings_state.select(Some(i));
     }
 
-    // --- YENİ DETAY PANELİ & KAYNAK YÖNLENDİRMELERİ ---
-
-    // Sol panele odaklan (h / Sol Yön Tuşu)
+    #[allow(dead_code)]
     pub fn focus_left_panel(&mut self) {
         self.detail_focus = DetailFocus::Episodes;
     }
 
-    // Sağ panele odaklan (l / Sağ Yön Tuşu)
+    #[allow(dead_code)]
     pub fn focus_right_panel(&mut self) {
         if matches!(self.source_state, SourceState::SelectSource { .. }) {
             self.detail_focus = DetailFocus::Sources;
         }
     }
 
-    // Aşağı yönlü hareket (j / Down Tuşu)
     pub fn handle_down_key(&mut self) {
         match self.detail_focus {
             DetailFocus::Episodes => self.next_episode(),
@@ -86,7 +83,6 @@ impl App {
         }
     }
 
-    // Yukarı yönlü hareket (k / Up Tuşu)
     pub fn handle_up_key(&mut self) {
         match self.detail_focus {
             DetailFocus::Episodes => self.previous_episode(),
@@ -118,7 +114,6 @@ impl App {
         }
     }
 
-    // Bölüm üzerinde Enter'a basılınca Scraping başlatma
     pub fn play_selected_video(&mut self) {
         let anime_idx = match self.list_state.selected() {
             Some(idx) => idx,
@@ -136,7 +131,7 @@ impl App {
         }
     }
 
-    // Sağ taraftaki kaynak seçilip Enter'a basılınca MPV/VLC başlatma
+    #[allow(dead_code)]
     pub fn confirm_source_selection(&mut self) {
         if let SourceState::SelectSource { ref sources, selected_index, .. } = self.source_state {
             if let Some(source) = sources.get(selected_index) {

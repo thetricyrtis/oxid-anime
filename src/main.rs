@@ -18,10 +18,18 @@ use app::App;
 use models::{InputMode, ViewMode, SearchMode};
 use ui::draw_main_ui;
 use search::{SearchManager, SearchResult};
+use std::sync::{Arc, Mutex};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    // Ensure database directories exist and extract JSONL if necessary
     let _ = database::check_and_extract_db();
+
+    // Initialize SQLite and populate if empty
+    let mut db_conn = database::init_db().expect("Failed to initialize database");
+    // Try to populate from existing JSONL (needs &mut for transaction)
+    let _ = database::populate_db_from_jsonl(&mut db_conn);
+    let db_conn = Arc::new(Mutex::new(db_conn));
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -29,7 +37,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = App::new();
+    let mut app = App::new(db_conn);
     app.load_language("en");
     app.load_db_version();
     let res = run_app(&mut terminal, &mut app).await;
@@ -75,7 +83,7 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Resul
                 models::DbUpdateResult::Success(version) => {
                     app.config.db_version = version;
                     app.db_update_status = None;
-                    app.reload_offline_db();
+                    // No need to reload in-memory list, SQLite is already updated
                 }
                 models::DbUpdateResult::Error(err) => {
                     let err_prefix = app.t("label_error");
@@ -148,7 +156,6 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Resul
                                     app.next_anime();
                                     if let Some(selected) = app.list_state.selected() {
                                         if selected < app.anime_list.len() {
-                                            // Seçili konumdan sonraki posterleri dinamik önbellekle
                                             app.image_manager.preload_images(&app.anime_list[selected..], 3, app.current_search_id);
                                             app.image_manager.request_image(&app.anime_list, Some(selected));
                                         }
@@ -206,7 +213,7 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Resul
                                 app.current_search_id += 1;
                                 if app.config.search_mode != SearchMode::Online {
                                     let query = app.search_input.clone();
-                                    search_manager.trigger_live_search(query, app.current_search_id, app.offline_db.clone());
+                                    search_manager.trigger_live_search(query, app.current_search_id, app.db_conn.clone());
                                 }
                                 should_render = true;
                             }
@@ -216,7 +223,7 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Resul
                                     app.current_search_id += 1;
                                     if app.config.search_mode != SearchMode::Online {
                                         let query = app.search_input.clone();
-                                        search_manager.trigger_live_search(query, app.current_search_id, app.offline_db.clone());
+                                        search_manager.trigger_live_search(query, app.current_search_id, app.db_conn.clone());
                                     }
                                 } else {
                                     app.anime_list.clear();
@@ -232,7 +239,7 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Resul
                                         app.search_input.clone(),
                                         app.current_search_id,
                                         app.config.search_mode,
-                                        app.offline_db.clone(),
+                                        app.db_conn.clone(),
                                         app.anime_list.clone(),
                                     );
                                 }

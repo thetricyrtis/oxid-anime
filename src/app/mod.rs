@@ -1,10 +1,11 @@
 use ratatui::widgets::ListState;
 use ratatui_image::protocol::Protocol;
-use crate::models::{AnimeInfo, InputMode, ViewMode, Config, OfflineAnimeEntry, DbUpdateResult, DetailFocus, SourceState};
+use crate::models::{AnimeInfo, InputMode, ViewMode, Config, DbUpdateResult, DetailFocus, SourceState};
 use crate::image_manager::ImageManager;
 use crate::search::SearchResult;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use rusqlite::Connection;
 use tokio::sync::mpsc;
 
 pub mod navigation;
@@ -27,23 +28,25 @@ pub struct App {
     pub config: Config,
     pub search_tx: mpsc::UnboundedSender<SearchResult>,
     pub search_rx: mpsc::UnboundedReceiver<SearchResult>,
-    pub offline_db: Arc<Vec<OfflineAnimeEntry>>,
+    
+    // SQLite connection (thread-safe)
+    pub db_conn: Arc<Mutex<Connection>>,
+    
     pub db_update_status: Option<String>,
     pub db_update_tx: mpsc::UnboundedSender<DbUpdateResult>,
     pub db_update_rx: mpsc::UnboundedReceiver<DbUpdateResult>,
     
-    // YENİ: Panelli detay ekranı odak ve kaynak durumları
+    // Detail screen focus and source states
     pub detail_focus: DetailFocus,
     pub source_state: SourceState,
 }
 
 impl App {
-    pub fn new() -> Self {
+    pub fn new(db_conn: Arc<Mutex<Connection>>) -> Self {
         let mut settings_state = ListState::default();
         settings_state.select(Some(0));
         let (search_tx, search_rx) = mpsc::unbounded_channel::<SearchResult>();
         let (db_update_tx, db_update_rx) = mpsc::unbounded_channel::<DbUpdateResult>();
-        let offline_db = Arc::new(crate::database::load_offline_db().unwrap_or_default());
 
         App {
             tab_index: 0,
@@ -62,12 +65,11 @@ impl App {
             config: Config::default(),
             search_tx,
             search_rx,
-            offline_db,
+            db_conn,
             db_update_status: None,
             db_update_tx,
             db_update_rx,
             
-            // YENİ: Odak sol taraftaki bölümlerde ve kaynak durumu boş başlar
             detail_focus: DetailFocus::default(),
             source_state: SourceState::None,
         }
@@ -79,11 +81,5 @@ impl App {
 
     pub fn models_view_mode_is_list(&self, mode: ViewMode) -> bool {
         mode == ViewMode::List
-    }
-
-    pub fn reload_offline_db(&mut self) {
-        if let Ok(db) = crate::database::load_offline_db() {
-            self.offline_db = Arc::new(db);
-        }
     }
 }

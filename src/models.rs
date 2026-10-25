@@ -127,13 +127,14 @@ pub struct CoverImage {
     pub large: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct OfflineAnimeSeason {
     pub season: String,
     pub year: Option<u32>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 pub struct OfflineAnimeEntry {
     #[serde(default)]
     pub sources: Vec<String>,
@@ -187,6 +188,7 @@ pub struct StreamSource {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum SourceState {
     None,
     Scraping {
