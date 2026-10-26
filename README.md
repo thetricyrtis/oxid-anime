@@ -18,7 +18,7 @@ A TUI anime watching app built with Rust.
 
 - Fast TUI with Kitty/Ghostty image support
 - Hybrid search (offline DB + AniList API)
-- Local-first library: track watch status, progress, and scores
+- Local-first library: track watch status and progress
 - English & Turkish localization
 
 > Note: Developed with AI assistance, human-managed architecture.
