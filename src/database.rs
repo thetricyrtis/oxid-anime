@@ -1,10 +1,11 @@
 use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 use zstd::stream::read::Decoder as ZstdDecoder;
-use rusqlite::{Connection, params};
-use crate::models::{OfflineAnimeEntry, DbUpdateResult};
+use rusqlite::{Connection, params, OptionalExtension};
+use crate::models::{OfflineAnimeEntry, DbUpdateResult, LibraryEntry};
 
 #[derive(serde::Deserialize)]
 struct GithubRelease {
@@ -18,7 +19,7 @@ struct GithubAsset {
     browser_download_url: String,
 }
 
-/// Initializes the SQLite database and creates the required table if it doesn't exist.
+/// Initializes the SQLite database and creates the required tables if they don't exist.
 pub fn init_db() -> rusqlite::Result<Connection> {
     let db_dir = "data/database";
     fs::create_dir_all(db_dir).ok();
@@ -26,9 +27,11 @@ pub fn init_db() -> rusqlite::Result<Connection> {
     let conn = Connection::open(db_path)?;
     
     // Speed up bulk inserts and switch to WAL mode
+    // Added the 'library' table for user's local watchlist.
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;
          PRAGMA synchronous = OFF;
+         
          CREATE TABLE IF NOT EXISTS anime (
             id INTEGER PRIMARY KEY,
             title TEXT NOT NULL,
@@ -41,11 +44,107 @@ pub fn init_db() -> rusqlite::Result<Connection> {
             synonyms TEXT,
             tags TEXT,
             sources TEXT
-        );"
+        );
+
+         CREATE TABLE IF NOT EXISTS library (
+            anilist_id INTEGER PRIMARY KEY,
+            title TEXT NOT NULL,
+            status TEXT NOT NULL,
+            progress INTEGER DEFAULT 0,
+            score INTEGER,
+            updated_at INTEGER NOT NULL
+         );"
     )?;
     
     Ok(conn)
 }
+
+// --- Library CRUD Functions ---
+
+/// Adds a new entry to the library or updates it if it already exists.
+/// Uses UPSERT (INSERT ... ON CONFLICT) to handle both cases smoothly.
+pub fn add_or_update_library_entry(conn: &Connection, entry: &LibraryEntry) -> rusqlite::Result<()> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+
+    conn.execute(
+        "INSERT INTO library (anilist_id, title, status, progress, score, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(anilist_id) DO UPDATE SET
+            title = excluded.title,
+            status = excluded.status,
+            progress = excluded.progress,
+            score = excluded.score,
+            updated_at = excluded.updated_at",
+        params![
+            entry.anilist_id,
+            entry.title,
+            entry.status, // Uses the ToSql trait we implemented in models.rs
+            entry.progress,
+            entry.score,
+            now // Always update timestamp on save
+        ],
+    )?;
+    Ok(())
+}
+
+/// Retrieves a specific library entry by its AniList ID.
+pub fn get_library_entry(conn: &Connection, anilist_id: u32) -> rusqlite::Result<Option<LibraryEntry>> {
+    let mut stmt = conn.prepare(
+        "SELECT anilist_id, title, status, progress, score, updated_at 
+         FROM library WHERE anilist_id = ?1"
+    )?;
+    
+    let entry = stmt.query_row([anilist_id], |row| {
+        Ok(LibraryEntry {
+            anilist_id: row.get(0)?,
+            title: row.get(1)?,
+            status: row.get(2)?, // Uses the FromSql trait
+            progress: row.get(3)?,
+            score: row.get(4)?,
+            updated_at: row.get(5)?,
+        })
+    }).optional()?;
+
+    Ok(entry)
+}
+
+/// Removes an anime from the user's library.
+pub fn remove_library_entry(conn: &Connection, anilist_id: u32) -> rusqlite::Result<()> {
+    conn.execute("DELETE FROM library WHERE anilist_id = ?1", [anilist_id])?;
+    Ok(())
+}
+
+/// Fetches all library entries, ordered by the most recently updated.
+/// This will be useful for rendering the "Library" tab later.
+pub fn get_all_library_entries(conn: &Connection) -> rusqlite::Result<Vec<LibraryEntry>> {
+    let mut stmt = conn.prepare(
+        "SELECT anilist_id, title, status, progress, score, updated_at 
+         FROM library ORDER BY updated_at DESC"
+    )?;
+    
+    let entries_iter = stmt.query_map([], |row| {
+        Ok(LibraryEntry {
+            anilist_id: row.get(0)?,
+            title: row.get(1)?,
+            status: row.get(2)?,
+            progress: row.get(3)?,
+            score: row.get(4)?,
+            updated_at: row.get(5)?,
+        })
+    })?;
+
+    let mut entries = Vec::new();
+    for entry in entries_iter {
+        entries.push(entry?);
+    }
+    Ok(entries)
+}
+
+// --- Existing Database Functions ---
+
 /// Checks if the JSONL database exists and if not, extracts it from the .zst file.
 /// If neither exists, it does nothing (update process handles downloading).
 pub fn check_and_extract_db() -> io::Result<()> {
@@ -79,7 +178,6 @@ pub fn populate_db_from_jsonl(conn: &mut Connection) -> io::Result<()> {
     let tx = conn.transaction().map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
     tx.execute("DELETE FROM anime", []).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
-    let mut count = 0;
     for line in reader.lines() {
         let line = line?;
         if line.trim().is_empty() {
@@ -114,8 +212,6 @@ pub fn populate_db_from_jsonl(conn: &mut Connection) -> io::Result<()> {
                         sources_json
                     ],
                 ).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-                
-                count += 1;
             }
         }
     }
@@ -124,6 +220,7 @@ pub fn populate_db_from_jsonl(conn: &mut Connection) -> io::Result<()> {
     tx.commit().map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
     Ok(())
 }
+
 /// Downloads the latest anime-offline-database.jsonl.zst and updates the local database.
 pub fn spawn_db_update(tx: mpsc::UnboundedSender<DbUpdateResult>) {
     tokio::spawn(async move {
@@ -206,4 +303,33 @@ pub fn spawn_db_update(tx: mpsc::UnboundedSender<DbUpdateResult>) {
             }
         }
     });
+}
+
+/// Fetches full anime metadata from the offline `anime` table by AniList ID.
+/// Returns None if not found (e.g., anime was added via online-only search).
+pub fn get_anime_by_id(conn: &Connection, anilist_id: u32) -> rusqlite::Result<Option<crate::models::AnimeInfo>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, title, status, episodes, picture, type_field, season, year, tags
+         FROM anime WHERE id = ?1"
+    )?;
+    
+    let result = stmt.query_row([anilist_id], |row| {
+        let tags_json: String = row.get::<_, String>(8)?;
+        let genres: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
+        
+        Ok(crate::models::AnimeInfo {
+            id: row.get(0)?,
+            title: row.get(1)?,
+            status: row.get::<_, Option<String>>(2)?.unwrap_or_else(|| "Unknown".to_string()),
+            episodes: row.get(3)?,
+            description: String::new(), // Anime table doesn't store description; will be empty
+            cover_image_url: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+            score: None, // Not stored in the offline table
+            season_year: row.get(7)?,
+            genres,
+            sources: vec![],
+        })
+    }).optional()?;
+
+    Ok(result)
 }

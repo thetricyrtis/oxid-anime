@@ -1,4 +1,7 @@
 use serde::{Deserialize, Serialize};
+use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
+
+// --- Existing Enums & Structs ---
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 pub enum SearchMode {
@@ -35,10 +38,12 @@ pub enum ViewMode {
     Detail,
 }
 
+// UPDATED: Added Library variant. Sources kept for future plugin system, but hidden from UI.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum DetailFocus {
     Episodes,
-    Sources,
+    Library,
+    Sources, // Hidden in UI for now
 }
 
 impl Default for DetailFocus {
@@ -82,6 +87,106 @@ pub struct AnimeInfo {
     #[serde(default)]
     pub sources: Vec<String>,
 }
+
+// --- Library Models (NEW) ---
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LibraryStatus {
+    Watching,
+    Planning,
+    Completed,
+    Dropped,
+    Paused,
+    Repeating,
+}
+
+impl Default for LibraryStatus {
+    fn default() -> Self {
+        LibraryStatus::Planning
+    }
+}
+
+impl LibraryStatus {
+    /// Returns the next status in the cycle for UI navigation.
+    pub fn next(&self) -> Self {
+        match self {
+            LibraryStatus::Watching => LibraryStatus::Planning,
+            LibraryStatus::Planning => LibraryStatus::Completed,
+            LibraryStatus::Completed => LibraryStatus::Dropped,
+            LibraryStatus::Dropped => LibraryStatus::Paused,
+            LibraryStatus::Paused => LibraryStatus::Repeating,
+            LibraryStatus::Repeating => LibraryStatus::Watching,
+        }
+    }
+
+    /// Returns the previous status in the cycle for UI navigation.
+    pub fn previous(&self) -> Self {
+        match self {
+            LibraryStatus::Watching => LibraryStatus::Repeating,
+            LibraryStatus::Planning => LibraryStatus::Watching,
+            LibraryStatus::Completed => LibraryStatus::Planning,
+            LibraryStatus::Dropped => LibraryStatus::Completed,
+            LibraryStatus::Paused => LibraryStatus::Dropped,
+            LibraryStatus::Repeating => LibraryStatus::Paused,
+        }
+    }
+
+    /// Converts the enum to a string for SQLite storage.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            LibraryStatus::Watching => "Watching",
+            LibraryStatus::Planning => "Planning",
+            LibraryStatus::Completed => "Completed",
+            LibraryStatus::Dropped => "Dropped",
+            LibraryStatus::Paused => "Paused",
+            LibraryStatus::Repeating => "Repeating",
+        }
+    }
+}
+
+// Implement ToSql for LibraryStatus to store it in SQLite as TEXT
+impl ToSql for LibraryStatus {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        Ok(ToSqlOutput::from(self.as_str()))
+    }
+}
+
+// Implement FromSql for LibraryStatus to read it from SQLite
+impl FromSql for LibraryStatus {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        let s = value.as_str()?;
+        match s {
+            "Watching" => Ok(LibraryStatus::Watching),
+            "Planning" => Ok(LibraryStatus::Planning),
+            "Completed" => Ok(LibraryStatus::Completed),
+            "Dropped" => Ok(LibraryStatus::Dropped),
+            "Paused" => Ok(LibraryStatus::Paused),
+            "Repeating" => Ok(LibraryStatus::Repeating),
+            _ => Err(FromSqlError::Other(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Invalid LibraryStatus",
+            )))),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct LibraryEntry {
+    pub anilist_id: u32,
+    pub title: String,
+    pub status: LibraryStatus,
+    pub progress: u32, // Watched episodes
+    pub score: Option<u32>,
+    pub updated_at: i64, // Unix timestamp
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfirmAction {
+    None,
+    DeleteFromLibrary { anime_id: u32 },
+}
+
+// --- API & Offline DB Models ---
 
 #[derive(Deserialize)]
 pub struct ApiResponse {
@@ -179,6 +284,8 @@ pub enum DbUpdateResult {
     Success(String),
     Error(String),
 }
+
+// --- Plugin / Source Models (Kept for future, hidden from UI) ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StreamSource {

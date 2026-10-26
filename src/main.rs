@@ -15,7 +15,7 @@ use crossterm::{
 };
 use std::{error::Error, io, time::Duration};
 use app::App;
-use models::{InputMode, ViewMode, SearchMode};
+use models::{InputMode, ViewMode, SearchMode, DetailFocus, ConfirmAction};
 use ui::draw_main_ui;
 use search::{SearchManager, SearchResult};
 use std::sync::{Arc, Mutex};
@@ -60,14 +60,31 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Resul
     loop {
         let mut should_render = false;
 
+        // --- IMAGE RECEIVER ---
         while let Ok((id, url, proto)) = app.image_manager.try_recv() {
             if id == app.current_search_id || id == 0 {
-                app.image_manager.cache_insert(url, proto);
-                app.update_current_image_from_cache();
+                app.image_manager.cache_insert(url.clone(), proto.clone());
+                
+                // NEW: If we're on the library tab, update current_image directly
+                if app.tab_index == 1 {
+                    if let Some(idx) = app.library_list_state.selected() {
+                        if let Some(entry) = app.library_list.get(idx) {
+                            let conn = app.db_conn.lock().unwrap();
+                            if let Ok(Some(anime)) = crate::database::get_anime_by_id(&conn, entry.anilist_id) {
+                                if anime.cover_image_url == url {
+                                    app.current_image = Some(proto.clone());
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    app.update_current_image_from_cache();
+                }
                 should_render = true;
             }
         }
 
+        // --- DB UPDATE RECEIVER ---
         while let Ok(result) = app.db_update_rx.try_recv() {
             match result {
                 models::DbUpdateResult::Progress(status_key) => {
@@ -83,7 +100,6 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Resul
                 models::DbUpdateResult::Success(version) => {
                     app.config.db_version = version;
                     app.db_update_status = None;
-                    // No need to reload in-memory list, SQLite is already updated
                 }
                 models::DbUpdateResult::Error(err) => {
                     let err_prefix = app.t("label_error");
@@ -93,6 +109,7 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Resul
             should_render = true;
         }
 
+        // --- SEARCH RECEIVER ---
         while let Ok(result) = app.search_rx.try_recv() {
             match result {
                 SearchResult::Success { id, results } => {
@@ -102,6 +119,9 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Resul
                         app.update_current_image_from_cache();
                         app.error_message = None; 
                         
+                        // Load library status for the newly selected anime
+                        app.load_current_library_entry();
+
                         if !app.anime_list.is_empty() {
                             app.image_manager.preload_images(&app.anime_list, 3, app.current_search_id);
                             app.image_manager.request_image(&app.anime_list, app.list_state.selected());
@@ -127,9 +147,27 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Resul
             should_render = true;
         }
 
+        // --- EVENT HANDLING ---
         if event::poll(Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == event::KeyEventKind::Press {
+                    
+                    // --- MODAL INTERCEPTION ---
+                    if app.confirm_action != ConfirmAction::None {
+                        match key.code {
+                            KeyCode::Char('y') => {
+                                app.execute_confirm_action();
+                            }
+                            KeyCode::Char('n') | KeyCode::Esc => {
+                                app.confirm_action = ConfirmAction::None;
+                            }
+                            _ => {}
+                        }
+                        should_render = true;
+                        terminal.draw(|f| draw_main_ui(f, app))?;
+                        continue;
+                    }
+
                     match app.input_mode {
                         InputMode::Normal => match key.code {
                             KeyCode::Char('q') => return Ok(()),
@@ -142,17 +180,51 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Resul
                             KeyCode::Char('h') | KeyCode::Left => {
                                 if app.view_mode == ViewMode::List {
                                     app.tab_index = (app.tab_index + 2) % 3;
+                                    // Refresh library list when entering the Library tab
+                                    if app.tab_index == 1 {
+                                        app.refresh_library_list();
+                                    }
+                                    should_render = true;
+                                } else if app.view_mode == ViewMode::Detail {
+                                    app.focus_left_panel();
                                     should_render = true;
                                 }
                             }
                             KeyCode::Char('l') | KeyCode::Right => {
                                 if app.view_mode == ViewMode::List {
                                     app.tab_index = (app.tab_index + 1) % 3;
+                                    // Refresh library list when entering the Library tab
+                                    if app.tab_index == 1 {
+                                        app.refresh_library_list();
+                                    }
+                                    should_render = true;
+                                } else if app.view_mode == ViewMode::Detail {
+                                    app.focus_right_panel();
                                     should_render = true;
                                 }
                             }
                             KeyCode::Char('j') | KeyCode::Down => {
-                                if app.tab_index == 0 && app.view_mode == ViewMode::List {
+                                if app.tab_index == 1 {
+                                    // Navigate the library list
+                                    app.next_library_item();
+                                    // NEW: Request poster for the newly selected library item
+                                    if let Some(idx) = app.library_list_state.selected() {
+                                        if let Some(entry) = app.library_list.get(idx) {
+                                            let conn = app.db_conn.lock().unwrap();
+                                            if let Ok(Some(anime)) = crate::database::get_anime_by_id(&conn, entry.anilist_id) {
+                                                let temp_list = vec![anime];
+                                                // Request the image (downloads if not in cache)
+                                                app.image_manager.request_image(&temp_list, Some(0));
+                                                // NEW: Update current_image immediately from cache if available
+                                                let url = temp_list[0].cover_image_url.clone();
+                                                if let Some(proto) = app.image_manager.cache_get(&url) {
+                                                    app.current_image = Some(proto.clone());
+                                                }
+                                            }
+                                        }
+                                    }
+                                    should_render = true;
+                                } else if app.tab_index == 0 && app.view_mode == ViewMode::List {
                                     app.next_anime();
                                     if let Some(selected) = app.list_state.selected() {
                                         if selected < app.anime_list.len() {
@@ -170,11 +242,33 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Resul
                                 }
                             }
                             KeyCode::Char('k') | KeyCode::Up => {
-                                if app.tab_index == 0 && app.view_mode == ViewMode::List {
+                                if app.tab_index == 1 {
+                                    // Navigate the library list
+                                    app.previous_library_item();
+                                    // NEW: Request poster for the newly selected library item
+                                    if let Some(idx) = app.library_list_state.selected() {
+                                        if let Some(entry) = app.library_list.get(idx) {
+                                            let conn = app.db_conn.lock().unwrap();
+                                            if let Ok(Some(anime)) = crate::database::get_anime_by_id(&conn, entry.anilist_id) {
+                                                let temp_list = vec![anime];
+                                                // Request the image (downloads if not in cache)
+                                                app.image_manager.request_image(&temp_list, Some(0));
+                                                // NEW: Update current_image immediately from cache if available
+                                                let url = temp_list[0].cover_image_url.clone();
+                                                if let Some(proto) = app.image_manager.cache_get(&url) {
+                                                    app.current_image = Some(proto.clone());
+                                                }
+                                            }
+                                        }
+                                    }
+                                    should_render = true;
+                                } else if app.tab_index == 0 && app.view_mode == ViewMode::List {
                                     app.previous_anime();
                                     if let Some(selected) = app.list_state.selected() {
-                                        app.image_manager.preload_images(&app.anime_list[selected..], 3, app.current_search_id);
-                                        app.image_manager.request_image(&app.anime_list, Some(selected));
+                                        if selected < app.anime_list.len() {
+                                            app.image_manager.preload_images(&app.anime_list[selected..], 3, app.current_search_id);
+                                            app.image_manager.request_image(&app.anime_list, Some(selected));
+                                        }
                                     }
                                     should_render = true;
                                 } else if app.tab_index == 0 && app.view_mode == ViewMode::Detail {
@@ -185,14 +279,48 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Resul
                                     should_render = true;
                                 }
                             }
+                            KeyCode::Char('+') | KeyCode::Char('=') => {
+                                if app.tab_index == 0 && app.view_mode == ViewMode::Detail && app.detail_focus == DetailFocus::Library {
+                                    app.increase_library_progress();
+                                    should_render = true;
+                                }
+                            }
+                            KeyCode::Char('-') => {
+                                if app.tab_index == 0 && app.view_mode == ViewMode::Detail && app.detail_focus == DetailFocus::Library {
+                                    app.decrease_library_progress();
+                                    should_render = true;
+                                }
+                            }
+                            KeyCode::Char('a') => {
+                                if app.tab_index == 0 && app.view_mode == ViewMode::Detail && app.current_library_entry.is_none() {
+                                    app.save_library_entry(); 
+                                    should_render = true;
+                                }
+                            }
+                            KeyCode::Char('d') => {
+                                if app.tab_index == 0 && app.view_mode == ViewMode::Detail && app.current_library_entry.is_some() {
+                                    app.request_delete_from_library();
+                                    should_render = true;
+                                }
+                            }
                             KeyCode::Enter => {
-                                if app.tab_index == 0 {
+                                if app.tab_index == 1 {
+                                    // Open the selected library item in detail view
+                                    app.open_library_entry_in_detail();
+                                    should_render = true;
+                                } else if app.tab_index == 0 {
                                     if app.view_mode == ViewMode::List && app.list_state.selected().is_some() {
                                         app.view_mode = ViewMode::Detail;
                                         app.episode_state.select(Some(0));
+                                        app.load_current_library_entry();
                                         should_render = true;
                                     } else if app.view_mode == ViewMode::Detail {
-                                        app.play_selected_video();
+                                        if app.detail_focus == DetailFocus::Library {
+                                            app.save_library_entry();
+                                        } else {
+                                            app.play_selected_video();
+                                        }
+                                        should_render = true;
                                     }
                                 } else if app.tab_index == 2 {
                                     app.toggle_setting();
