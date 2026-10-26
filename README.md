@@ -6,20 +6,20 @@ A TUI anime watching app built with Rust.
 
 ## Project Status
 
-**Early Access (v0.1.4)** – Core UI and search are functional.
+**Early Access (v0.2.0)** – Core UI, search, and local library are functional.
 
 **Currently working on:**
 
 - MPV integration
-- Local-first library
 - TypeScript/JavaScript plugin system
+- AniList sync (import/export library)
 
 ## Features
 
 - Fast TUI with Kitty/Ghostty image support
-- Hybrid search (offline DB + Anilist API)
+- Hybrid search (offline DB + AniList API)
+- Local-first library: track watch status, progress, and scores
 - English & Turkish localization
-- Optimized for low-end hardware
 
 > Note: Developed with AI assistance, human-managed architecture.
 

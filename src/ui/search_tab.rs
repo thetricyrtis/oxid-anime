@@ -1,16 +1,17 @@
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Rect, Alignment},
     style::{Color, Modifier, Style},
-    widgets::{List, ListItem, Paragraph, Wrap, Padding},
+    widgets::{List, ListItem, Paragraph, Wrap, Padding, Clear},
     Frame,
+    text::{Line, Span},
 };
 use crate::app::App;
-use crate::models::{InputMode, ViewMode, DetailFocus, SourceState};
+use crate::models::{InputMode, ViewMode, DetailFocus, ConfirmAction, LibraryStatus};
 use super::components::create_block;
 
 pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
     if app.view_mode == ViewMode::List {
-        // ... (List görünümü olduğu gibi kalıyor) ...
+        // --- LIST VIEW ---
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(3), Constraint::Min(0)])
@@ -49,7 +50,14 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
 
         if let Some(idx) = app.list_state.selected() {
             if let Some(anime) = app.anime_list.get(idx) {
-                let genres_str = if anime.genres.is_empty() { "-".to_string() } else { anime.genres.join(", ") };
+                // Limit genres to a maximum of 4 to prevent UI overflow in list view
+                let genres_str = if anime.genres.is_empty() {
+                    "-".to_string()
+                } else if anime.genres.len() > 4 {
+                    format!("{}, ...", anime.genres.iter().take(4).cloned().collect::<Vec<_>>().join(", "))
+                } else {
+                    anime.genres.join(", ")
+                };
                 let score_str = anime.score.map(|s| format!("{:.1}/10", s as f32 / 10.0)).unwrap_or_else(|| "??".to_string());
                 let year_str = anime.season_year.map(|y| y.to_string()).unwrap_or_else(|| "??".to_string());
 
@@ -85,19 +93,19 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
             f.render_widget(image_widget, poster_inner);
         }
     } else {
-        // DETAY GÖRÜNÜMÜ (DETAIL VIEW)
+        // --- DETAIL VIEW ---
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(65), Constraint::Percentage(35)])
             .split(area);
 
-        // Sol Taraf: Üst (Künye/Özet), Alt (Bölümler)
+        // Left Side: Top (Info/Summary), Bottom (Episodes)
         let left_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
             .split(chunks[0]);
 
-        // Sağ Taraf: Üst (Poster %60), Alt (Video Kaynakları %40)
+        // Right Side: Top (Poster 60%), Bottom (Library 40%)
         let right_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
@@ -105,7 +113,15 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
 
         if let Some(idx) = app.list_state.selected() {
             if let Some(anime) = app.anime_list.get(idx) {
-                let genres_str = if anime.genres.is_empty() { "-".to_string() } else { anime.genres.join(", ") };
+                // --- LEFT TOP: Info / Summary ---
+                // Limit genres to a maximum of 4 to prevent UI overflow
+                let genres_str = if anime.genres.is_empty() {
+                    "-".to_string()
+                } else if anime.genres.len() > 4 {
+                    format!("{}, ...", anime.genres.iter().take(4).cloned().collect::<Vec<_>>().join(", "))
+                } else {
+                    anime.genres.join(", ")
+                };
                 let score_str = anime.score.map(|s| format!("{:.1}/10", s as f32 / 10.0)).unwrap_or_else(|| "??".to_string());
                 let year_str = anime.season_year.map(|y| y.to_string()).unwrap_or_else(|| "??".to_string());
                 let desc = if anime.description.is_empty() { app.t("info_no_description") } else { &anime.description };
@@ -123,7 +139,7 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
                     .wrap(Wrap { trim: false });
                 f.render_widget(desc_p, left_chunks[0]);
 
-                // Bölüm Listesi
+                // --- LEFT BOTTOM: Episodes List ---
                 let ep_count = anime.episodes.unwrap_or(12);
                 let ep_items: Vec<ListItem> = (1..=ep_count)
                     .map(|i| ListItem::new(format!("  {} {}", app.t("label_episode"), i)))
@@ -137,70 +153,122 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
                     .highlight_style(Style::default().bg(Color::Rgb(40,40,40)).fg(Color::Cyan))
                     .highlight_symbol(if is_ep_focused { ">> " } else { "  " });
                 f.render_stateful_widget(ep_list, left_chunks[1], &mut app.episode_state);
-            }
-        }
 
-        // Sağ Üst: Poster
-        let poster_block = create_block(app.t("title_poster"));
-        let poster_area = right_chunks[0];
-        let poster_inner = poster_block.inner(poster_area);
+                // --- RIGHT TOP: Poster ---
+                let poster_block = create_block(app.t("title_poster"));
+                let poster_area = right_chunks[0];
+                let poster_inner = poster_block.inner(poster_area);
+                f.render_widget(poster_block, poster_area);
+                if let Some(img_proto) = &mut app.current_image {
+                    let image_widget = ratatui_image::Image::new(img_proto);
+                    f.render_widget(image_widget, poster_inner);
+                }
 
-        f.render_widget(poster_block, poster_area);
-        if let Some(img_proto) = &mut app.current_image {
-            let image_widget = ratatui_image::Image::new(img_proto);
-            f.render_widget(image_widget, poster_inner);
-        }
+                // --- RIGHT BOTTOM: Library Panel ---
+                let is_lib_focused = app.detail_focus == DetailFocus::Library;
+                let lib_border_color = if is_lib_focused { Color::Yellow } else { Color::Reset };
+                
+                let lib_block = create_block(app.t("title_library"))
+                    .border_style(Style::default().fg(lib_border_color));
 
-        // Sağ Alt: Video Kaynakları & Kazıma Paneli
-        let is_sources_focused = app.detail_focus == DetailFocus::Sources;
-        let sources_border_color = if is_sources_focused { Color::Yellow } else { Color::Reset };
+                // If anime is not in library yet
+                if app.current_library_entry.is_none() {
+                    let msg = Paragraph::new(format!("\n  {}\n\n  {}", app.t("msg_add_to_library"), app.t("info_episodes")))
+                        .block(lib_block)
+                        .style(Style::default().fg(Color::DarkGray));
+                    f.render_widget(msg, right_chunks[1]);
+                } else {
+                    // Anime is in library, show status and progress
+                    let statuses = vec![
+                        LibraryStatus::Watching,
+                        LibraryStatus::Planning,
+                        LibraryStatus::Completed,
+                        LibraryStatus::Dropped,
+                        LibraryStatus::Paused,
+                        LibraryStatus::Repeating,
+                    ];
 
-        match &app.source_state {
-            SourceState::None => {
-                let p = Paragraph::new(format!("\n  {}", app.t("info_select_ep_prompt")))
-                    .style(Style::default().fg(Color::DarkGray))
-                    .block(create_block(app.t("title_sources")).border_style(Style::default().fg(sources_border_color)));
-                f.render_widget(p, right_chunks[1]);
-            }
-            SourceState::Scraping { episode_num } => {
-                let msg_template = app.t("modal_scraping_msg");
-                let formatted_msg = msg_template.replace("{}", &episode_num.to_string());
+                    let mut items = Vec::new();
+                    items.push(Line::from(Span::raw(format!("  {} ", app.t("label_status")))));
 
-                let p = Paragraph::new(formatted_msg)
-                    .style(Style::default().fg(Color::Yellow))
-                    .block(create_block(app.t("modal_scraping_title")).border_style(Style::default().fg(sources_border_color)));
-                f.render_widget(p, right_chunks[1]);
-            }
-            SourceState::SelectSource { episode_num, sources, selected_index } => {
-                let items: Vec<ListItem> = sources
-                    .iter()
-                    .map(|src| ListItem::new(format!("  󰕼 {:<12} | 󰓅 {:<6}", src.name, src.quality)))
-                    .collect();
+                    for (i, status) in statuses.iter().enumerate() {
+                        let is_selected = i == app.library_status_index;
+                        let prefix = if is_selected && is_lib_focused { ">> " } else { "   " };
+                        let style = if is_selected { Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD) } else { Style::default() };
+                        
+                        let status_str = match status {
+                            LibraryStatus::Watching => app.t("status_watching"),
+                            LibraryStatus::Planning => app.t("status_planning"),
+                            LibraryStatus::Completed => app.t("status_completed"),
+                            LibraryStatus::Dropped => app.t("status_dropped"),
+                            LibraryStatus::Paused => app.t("status_paused"),
+                            LibraryStatus::Repeating => app.t("status_repeating"),
+                        };
+                        
+                        items.push(Line::from(vec![
+                            Span::styled(format!("{}{}", prefix, status_str), style)
+                        ]));
+                    }
 
-                let title_template = app.t("modal_select_source_title");
-                let title = title_template.replace("{}", &episode_num.to_string());
+                    items.push(Line::from(""));
+                    items.push(Line::from(vec![
+                        Span::raw(format!("  {} ", app.t("label_progress"))),
+                        Span::styled(format!("{}", app.library_progress), Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+                        Span::raw(format!(" / {}", anime.episodes.map(|e| e.to_string()).unwrap_or_else(|| "?".to_string()))),
+                    ]));
+                    
+                    items.push(Line::from(Span::styled(
+                        format!("  {}", app.t("msg_change_progress")),
+                        Style::default().fg(Color::DarkGray)
+                    )));
 
-                let list = List::new(items)
-                    .block(create_block(&title).border_style(Style::default().fg(sources_border_color)))
-                    .highlight_style(
-                        Style::default()
-                            .bg(Color::Rgb(50, 50, 80))
-                            .fg(Color::Green)
-                            .add_modifier(Modifier::BOLD),
-                    )
-                    .highlight_symbol(if is_sources_focused { ">> " } else { "  " });
+                    let lib_p = Paragraph::new(items).block(lib_block);
+                    f.render_widget(lib_p, right_chunks[1]);
+                }
 
-                let mut source_list_state = ratatui::widgets::ListState::default();
-                source_list_state.select(Some(*selected_index));
-
-                f.render_stateful_widget(list, right_chunks[1], &mut source_list_state);
-            }
-            SourceState::Error(err_msg) => {
-                let p = Paragraph::new(format!("\n  󰅚 {}: {}", app.t("label_error"), err_msg))
-                    .style(Style::default().fg(Color::Red))
-                    .block(create_block(app.t("modal_error_title")).border_style(Style::default().fg(sources_border_color)));
-                f.render_widget(p, right_chunks[1]);
+                // --- MODAL: Delete Confirmation Popup ---
+                if let ConfirmAction::DeleteFromLibrary { .. } = app.confirm_action {
+                    let area = centered_rect(50, 20, f.area());
+                    f.render_widget(Clear, area);
+                    
+                    let popup_block = create_block(app.t("title_confirm_delete"))
+                        .border_style(Style::default().fg(Color::Red));
+                    
+                    // Use short message to prevent overflow
+                    let text = Paragraph::new(format!(
+                        "\n  {}\n\n  [y] {}   [n] {}",
+                        app.t("msg_confirm_delete_short"),
+                        app.t("msg_yes"),
+                        app.t("msg_no")
+                    ))
+                    .block(popup_block)
+                    .alignment(Alignment::Center)
+                    .wrap(Wrap { trim: true })
+                    .style(Style::default().fg(Color::White));
+                    
+                    f.render_widget(text, area);
+                }
             }
         }
     }
+}
+
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
 }
