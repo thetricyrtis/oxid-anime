@@ -1,14 +1,19 @@
 use crate::app::App;
+use crate::paths;
 use std::collections::HashMap;
 use std::fs;
 
+const LOCALE_EN: &str = include_str!("../../locales/en.json");
+const LOCALE_TR: &str = include_str!("../../locales/tr.json");
+
 impl App {
     pub fn load_language(&mut self, lang: &str) {
-        let path = format!("locales/{}.json", lang);
-        if let Ok(content) = fs::read_to_string(path) {
-            if let Ok(parsed) = serde_json::from_str::<HashMap<String, String>>(&content) {
-                self.translations = parsed;
-            }
+        let content = match lang {
+            "tr" => LOCALE_TR,
+            _ => LOCALE_EN,
+        };
+        if let Ok(parsed) = serde_json::from_str::<HashMap<String, String>>(content) {
+            self.translations = parsed;
         }
     }
 
@@ -60,11 +65,17 @@ impl App {
     }
 
     pub fn load_db_version(&mut self) {
-        let version_path = "data/database/db_version.txt";
-        if let Ok(version) = fs::read_to_string(version_path) {
-            self.config.db_version = version.trim().to_string();
-        } else {
-            self.config.db_version = self.t("db_status_not_installed").to_string();
+        match paths::version_path() {
+            Ok(version_path) => {
+                if let Ok(version) = fs::read_to_string(&version_path) {
+                    self.config.db_version = version.trim().to_string();
+                } else {
+                    self.config.db_version = self.t("db_status_not_installed").to_string();
+                }
+            }
+            Err(_) => {
+                self.config.db_version = self.t("db_status_not_installed").to_string();
+            }
         }
     }
 }
