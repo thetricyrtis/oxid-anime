@@ -29,15 +29,15 @@ cargo install --git https://github.com/thetricyrtis/oxid-anime --tag v0.3.0
 - Local-first library: track watch status and progress
 - English & Turkish localization
 
-> Note: Developed with AI-assisted code, human-designed architecture and
-> testing.
-
 ## Data Locations
 
 On Linux, oxid-anime stores its data in:
 
 - Database: `~/.local/share/oxid-anime/database/oxid.db`
 - Cache: `~/.cache/oxid-anime/`
+
+> Note: Developed with AI-assisted code, human-designed architecture and
+> testing.
 
 ## Data License
 
