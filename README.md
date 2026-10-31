@@ -1,14 +1,14 @@
 # oxid-anime
 
-A TUI anime watching app built with Rust.
+A TUI anime library and tracking app built with Rust.
 
 ![oxid-anime screenshot](assets/screenshot.png)
 
 ## Project Status
 
-**Early Access (v0.2.0)** – Core UI, search, and local library are functional.
+**v0.2.0 (alpha)** – Core UI, search, and local library are functional.
 
-**Currently working on:**
+**To Do:**
 
 - MPV integration
 - TypeScript/JavaScript plugin system
@@ -21,7 +21,7 @@ A TUI anime watching app built with Rust.
 - Local-first library: track watch status and progress
 - English & Turkish localization
 
-> Note: Developed with AI assistance, human-managed architecture.
+> Note: Developed with AI-assisted code, human-designed architecture and testing.
 
 ## Data License
 
