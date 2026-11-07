@@ -1,6 +1,6 @@
 # oxid-anime
 
-A TUI anime library and tracking app built with Rust.
+A TUI anime watching app built with Rust.
 
 ## Screenshots
 
@@ -22,8 +22,8 @@ cargo install --git https://github.com/thetricyrtis/oxid-anime --tag v0.3.0
 
 **To Do:**
 
+- TypeScript/JavaScript plugin system for anime sources
 - MPV integration
-- TypeScript/JavaScript plugin system
 - AniList sync (import/export library)
 
 ## Features
