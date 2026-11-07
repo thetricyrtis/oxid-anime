@@ -1,6 +1,6 @@
 # oxid-anime
 
-A TUI anime watching app built with Rust.
+A TUI anime watching and tracking app built with Rust.
 
 ## Screenshots
 
